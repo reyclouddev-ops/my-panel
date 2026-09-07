@@ -3,12 +3,14 @@ import fileUpload from 'express-fileupload';
 import fs from 'fs';
 import path from 'path';
 import { spawn, exec } from 'child_process';
+import pidusage from 'pidusage';
 
 const app = express();
 const PORT = 3000;
 const ROOT_DIR = path.resolve('.');
 
 const servers = {};
+const intentionalStops = new Set(); // Melacak apakah server sengaja di-stop
 let globalTerminalLogs = 'ReyCloud Daemon siap menerima perintah...\n';
 
 app.use(fileUpload());
@@ -16,21 +18,37 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(ROOT_DIR, 'public')));
 
-// ==========================================
-// API: SERVER & INSTANCE MANAGEMENT
-// ==========================================
-app.get('/api/servers', (req, res) => {
-  const folders = fs.readdirSync(ROOT_DIR, { withFileTypes: true })
-    .filter(dirent => dirent.isDirectory() && !['node_modules', '.git', 'public', '.npm'].includes(dirent.name))
-    .map(dirent => dirent.name);
+app.get('/api/servers', async (req, res) => {
+  try {
+    const dirents = await fs.promises.readdir(ROOT_DIR, { withFileTypes: true });
+    const folders = dirents
+      .filter(dirent => dirent.isDirectory() && !['node_modules', '.git', 'public', '.npm'].includes(dirent.name))
+      .map(dirent => dirent.name);
 
-  const serverList = folders.map(folder => ({
-    name: folder,
-    running: servers[folder]?.running || false,
-    logs: servers[folder]?.logs || 'Server belum dijalankan...\n'
-  }));
+    const serverList = await Promise.all(folders.map(async (folder) => {
+      let stats = { cpu: 0, memory: 0 };
+      const proc = servers[folder]?.process;
 
-  res.json({ servers: serverList, terminalLogs: globalTerminalLogs });
+      if (servers[folder]?.running && proc && proc.pid) {
+        try {
+          const metrics = await pidusage(proc.pid);
+          stats.cpu = metrics.cpu.toFixed(1);
+          stats.memory = (metrics.memory / 1024 / 1024).toFixed(1);
+        } catch (e) {}
+      }
+
+      return {
+        name: folder,
+        running: servers[folder]?.running || false,
+        logs: servers[folder]?.logs || 'Server belum dijalankan...\n',
+        stats: stats
+      };
+    }));
+
+    res.json({ servers: serverList, terminalLogs: globalTerminalLogs });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal membaca folder server' });
+  }
 });
 
 app.post('/api/servers/create', (req, res) => {
@@ -70,25 +88,45 @@ app.post('/api/servers/start', (req, res) => {
   const dir = path.join(ROOT_DIR, name);
   if (!fs.existsSync(dir) || servers[name]?.running) return res.json({ success: true });
 
-  servers[name] = { running: true, logs: `[INFO] Menyalakan instance ${name}...\n`, process: null };
+  intentionalStops.delete(name);
+  startInstanceProcess(name, dir);
+  res.json({ success: true });
+});
+
+function startInstanceProcess(name, dir) {
+  servers[name] = { running: true, logs: (servers[name]?.logs || '') + `\n[INFO] Menyalakan instance ${name}...\n`, process: null };
   const child = spawn('node', ['index.js'], { cwd: dir });
 
   child.stdout.on('data', (data) => {
     servers[name].logs += data.toString();
     if (servers[name].logs.length > 5000) servers[name].logs = servers[name].logs.slice(-5000);
   });
-  child.stderr.on('data', (data) => servers[name].logs += `[ERROR] ${data.toString()}`);
+  
+  child.stderr.on('data', (data) => {
+    servers[name].logs += `[ERROR] ${data.toString()}`;
+  });
+
   child.on('close', (code) => {
     servers[name].logs += `\n[INFO] Instance berhenti (kode ${code})\n`;
     servers[name].running = false;
+
+    // AUTO-RESTART JIKA CRASH (KELUAR DENGAN KODE ERROR != 0 DAN TIDAK DI-STOP SENGAJA)
+    if (code !== 0 && !intentionalStops.has(name)) {
+      servers[name].logs += `\n[⚠️ WATCHER] Instance ${name} mengalami crash! Mencoba restart otomatis dalam 3 detik...\n`;
+      setTimeout(() => {
+        if (!intentionalStops.has(name) && !servers[name].running) {
+          startInstanceProcess(name, dir);
+        }
+      }, 3000);
+    }
   });
 
   servers[name].process = child;
-  res.json({ success: true });
-});
+}
 
 app.post('/api/servers/stop', (req, res) => {
   const { name } = req.body;
+  intentionalStops.add(name); // Tandai bahwa ini dimatikan secara sengaja
   if (servers[name]?.process) {
     servers[name].process.kill();
     servers[name].running = false;
@@ -98,28 +136,19 @@ app.post('/api/servers/stop', (req, res) => {
 
 app.post('/api/servers/restart', (req, res) => {
   const { name } = req.body;
+  intentionalStops.add(name);
   if (servers[name]?.process) {
     servers[name].process.kill();
     servers[name].running = false;
   }
   setTimeout(() => {
+    intentionalStops.delete(name);
     const dir = path.join(ROOT_DIR, name);
-    servers[name] = { running: true, logs: `[INFO] Merestart instance ${name}...\n`, process: null };
-    const child = spawn('node', ['index.js'], { cwd: dir });
-    child.stdout.on('data', (data) => servers[name].logs += data.toString());
-    child.stderr.on('data', (data) => servers[name].logs += `[ERROR] ${data.toString()}`);
-    child.on('close', (code) => {
-      servers[name].logs += `\n[INFO] Instance berhenti (kode ${code})\n`;
-      servers[name].running = false;
-    });
-    servers[name].process = child;
+    startInstanceProcess(name, dir);
     res.json({ success: true });
   }, 600);
 });
 
-// ==========================================
-// API: TERMINAL COMMAND EXECUTOR
-// ==========================================
 app.post('/api/terminal/run', (req, res) => {
   const { command, folder } = req.body;
   const targetDir = folder ? path.join(ROOT_DIR, folder) : ROOT_DIR;
@@ -134,22 +163,22 @@ app.post('/api/terminal/run', (req, res) => {
   });
 });
 
-// ==========================================
-// API: FILE & CONFIG MANAGER
-// ==========================================
-app.get('/api/files', (req, res) => {
-  const { folder } = req.query;
-  const targetDir = path.join(ROOT_DIR, folder);
-  if (!fs.existsSync(targetDir)) return res.status(404).json({ error: 'Not found' });
+app.get('/api/files', async (req, res) => {
+  try {
+    const { folder } = req.query;
+    const targetDir = path.join(ROOT_DIR, folder);
+    if (!fs.existsSync(targetDir)) return res.status(404).json({ error: 'Not found' });
 
-  const items = fs.readdirSync(targetDir, { withFileTypes: true }).map(item => ({
-    name: item.name,
-    isDirectory: item.isDirectory()
-  }));
-  res.json(items);
+    const items = (await fs.promises.readdir(targetDir, { withFileTypes: true })).map(item => ({
+      name: item.name,
+      isDirectory: item.isDirectory()
+    }));
+    res.json(items);
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal membaca file' });
+  }
 });
 
-// UPLOAD DENGAN FITUR AUTO-EXTRACT ZIP
 app.post('/api/files/upload', (req, res) => {
   if (!req.files || !req.files.file) return res.status(400).send('File tidak ada');
   const { folder } = req.body;
@@ -160,7 +189,6 @@ app.post('/api/files/upload', (req, res) => {
   file.mv(targetPath, (err) => {
     if (err) return res.status(500).send(err);
 
-    // Jika file berformat .zip, langsung ekstrak otomatis dan hapus zip aslinya
     if (file.name.endsWith('.zip')) {
       exec(`unzip -o "${file.name}" && rm "${file.name}"`, { cwd: targetDir }, (error) => {
         if (error) console.log('Gagal ekstrak otomatis:', error);
@@ -197,5 +225,5 @@ app.post('/api/files/save', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`[🟢] ReyCloud Master Daemon aktif di http://localhost:${PORT}`);
+  console.log(`[🟢] ReyCloud Master Daemon aktif di http://127.0.0.1:${PORT}`);
 });

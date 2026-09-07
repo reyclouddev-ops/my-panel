@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Instance Manager & Settings</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen p-3 sm:p-6">
+  <div class="max-w-4xl mx-auto space-y-6">
+    
+    <!-- TOP NAVIGATION -->
+    <div class="flex items-center justify-between bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-xl">
+      <a href="/" class="text-sky-400 hover:text-sky-300 text-xs font-bold flex items-center gap-1.5 transition-all">
+        <span>⬅️</span> Kembali ke Dashboard
+      </a>
+      <h2 id="titleFolder" class="text-sm sm:text-base font-black text-white font-mono truncate max-w-[200px] sm:max-w-xs">📂 Kelola Instance</h2>
+    </div>
+
+    <!-- TABS -->
+    <div class="flex gap-2 border-b border-slate-800 pb-2 overflow-x-auto">
+      <button onclick="switchTab('files')" id="tab-files" class="px-4 py-2 text-xs font-bold rounded-xl bg-sky-600 text-white transition-all cursor-pointer whitespace-nowrap">📁 File & Editor</button>
+      <button onclick="switchTab('settings')" id="tab-settings" class="px-4 py-2 text-xs font-bold rounded-xl bg-slate-900 text-slate-400 hover:bg-slate-800 transition-all cursor-pointer whitespace-nowrap">⚙️ Domain, Port & Node.js</button>
+      <button onclick="switchTab('terminal')" id="tab-terminal" class="px-4 py-2 text-xs font-bold rounded-xl bg-slate-900 text-slate-400 hover:bg-slate-800 transition-all cursor-pointer whitespace-nowrap">💻 Terminal & npm install</button>
+    </div>
+
+    <!-- TAB 1: FILES -->
+    <div id="content-files" class="space-y-4">
+      <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-xl">
+        <h3 class="text-xs sm:text-sm font-bold text-sky-400 mb-3">Upload File / Script ZIP</h3>
+        <form action="/api/files/upload" method="POST" enctype="multipart/form-data" class="flex flex-col sm:flex-row gap-2">
+          <input type="hidden" name="folder" id="inputFolder">
+          <input type="file" name="file" required class="bg-slate-950 border border-slate-700 text-xs rounded-xl p-2 text-slate-300 flex-1">
+          <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shadow">Upload</button>
+        </form>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-xl overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="border-b border-slate-800 text-[11px] text-slate-400">
+              <th class="p-2.5">Nama File</th>
+              <th class="p-2.5">Tipe</th>
+              <th class="p-2.5 text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="fileList" class="text-xs font-mono">
+            <tr><td colspan="3" class="p-4 text-center text-slate-500">Memuat file...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="editorSection" class="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-xl space-y-3 hidden">
+        <div class="flex justify-between items-center">
+          <h3 class="text-xs sm:text-sm font-bold text-yellow-400 font-mono">Edit File: <span id="currentEditingFile"></span></h3>
+          <button onclick="closeEditor()" class="text-rose-400 text-xs hover:underline cursor-pointer">Tutup [X]</button>
+        </div>
+        <textarea id="fileContent" class="w-full h-64 bg-slate-950 border border-slate-800 text-emerald-400 font-mono text-xs p-3 rounded-xl focus:outline-none focus:border-sky-500"></textarea>
+        <button onclick="saveFile()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shadow">💾 Simpan Perubahan</button>
+      </div>
+    </div>
+
+    <!-- TAB 2: SETTINGS (.ENV / DOMAIN / PORT / NODE) -->
+    <div id="content-settings" class="space-y-4 hidden">
+      <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
+        <h3 class="text-sm sm:text-base font-bold text-sky-400">Konfigurasi Server & Environment</h3>
+        <p class="text-xs text-slate-400">Atur port dinamis, custom domain, atau versi Node.js instance ini.</p>
+        
+        <div class="space-y-3.5">
+          <div>
+            <label class="text-xs font-bold text-slate-300">Port Server:</label>
+            <input type="text" id="envPort" class="w-full bg-slate-950 border border-slate-700 text-xs rounded-xl p-3 text-slate-200 mt-1 font-mono">
+          </div>
+          <div>
+            <label class="text-xs font-bold text-slate-300">Domain / Subdomain (contoh: api-bot.reycode.my.id):</label>
+            <input type="text" id="envDomain" class="w-full bg-slate-950 border border-slate-700 text-xs rounded-xl p-3 text-slate-200 mt-1 font-mono">
+          </div>
+          <div>
+            <label class="text-xs font-bold text-slate-300">Versi Node.js:</label>
+            <select id="envNodeVersion" class="w-full bg-slate-950 border border-slate-700 text-xs rounded-xl p-3 text-slate-200 mt-1 font-mono">
+              <option value="node">Node.js Default Sistem (v26.4.0)</option>
+              <option value="node20">Node.js v20.x (LTS)</option>
+              <option value="node18">Node.js v18.x</option>
+            </select>
+          </div>
+          <button onclick="saveEnvSettings()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-3 rounded-xl transition-all cursor-pointer shadow w-full sm:w-auto">
+            💾 Simpan Konfigurasi
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: TERMINAL & NPM INSTALL -->
+    <div id="content-terminal" class="space-y-4 hidden">
+      <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
+        <h3 class="text-sm sm:text-base font-bold text-sky-400">Terminal & Package Manager (npm install)</h3>
+        <p class="text-xs text-slate-400">Eksekusi perintah terminal khusus di dalam folder instance ini.</p>
+        
+        <div class="flex flex-col sm:flex-row gap-2">
+          <input type="text" id="instanceCmd" placeholder="Contoh: npm install multer --ignore-scripts" 
+            class="flex-1 bg-slate-950 border border-slate-700 text-xs rounded-xl p-3 text-slate-200 font-mono focus:outline-none focus:border-sky-500">
+          <button onclick="runInstanceTerminal()" class="bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-5 py-3 rounded-xl transition-all cursor-pointer shadow whitespace-nowrap">
+            ▶ Jalankan
+          </button>
+        </div>
+
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Output Terminal Instance</div>
+          <pre id="instanceTermLogs" class="bg-slate-950 border border-slate-800 p-3 rounded-xl font-mono text-[11px] text-emerald-400 h-52 overflow-y-auto whitespace-pre-wrap break-all shadow-inner">Ketik perintah lalu klik jalankan...</pre>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const folder = urlParams.get('folder');
+    document.getElementById('titleFolder').innerText = `📂 Kelola: ${folder}`;
+    document.getElementById('inputFolder').value = folder;
+
+    let activeFile = '';
+
+    function switchTab(tab) {
+      ['files', 'settings', 'terminal'].forEach(t => {
+        document.getElementById(`content-${t}`).classList.add('hidden');
+        document.getElementById(`tab-${t}`).className = 'px-4 py-2 text-xs font-bold rounded-xl bg-slate-900 text-slate-400 hover:bg-slate-800 transition-all cursor-pointer whitespace-nowrap';
+      });
+      document.getElementById(`content-${tab}`).classList.remove('hidden');
+      document.getElementById(`tab-${tab}`).className = 'px-4 py-2 text-xs font-bold rounded-xl bg-sky-600 text-white transition-all cursor-pointer whitespace-nowrap';
+      
+      if (tab === 'settings') loadEnvSettings();
+    }
+
+    async function loadFiles() {
+      const res = await fetch(`/api/files?folder=${folder}`);
+      const files = await res.json();
+      const tbody = document.getElementById('fileList');
+
+      tbody.innerHTML = files.map(f => `
+        <tr class="border-b border-slate-800/50 hover:bg-slate-800/30">
+          <td class="p-2.5 text-slate-200">${f.isDirectory ? '📁' : '📄'} ${f.name}</td>
+          <td class="p-2.5 text-slate-400">${f.isDirectory ? 'Folder' : 'File'}</td>
+          <td class="p-2.5 text-right space-x-1.5">
+            ${!f.isDirectory ? `<button onclick="openEditor('${f.name}')" class="bg-sky-600/80 hover:bg-sky-500 text-white px-2.5 py-1 rounded-lg text-[11px] cursor-pointer">Edit</button>` : ''}
+            <button onclick="deleteFile('${f.name}')" class="bg-rose-600/80 hover:bg-rose-500 text-white px-2.5 py-1 rounded-lg text-[11px] cursor-pointer">Hapus</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function openEditor(filename) {
+      activeFile = filename;
+      const res = await fetch(`/api/files/read?folder=${folder}&filename=${filename}`);
+      const content = await res.text();
+      document.getElementById('currentEditingFile').innerText = filename;
+      document.getElementById('fileContent').value = content;
+      document.getElementById('editorSection').classList.remove('hidden');
+    }
+
+    async function saveFile() {
+      const content = document.getElementById('fileContent').value;
+      await fetch('/api/files/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder, filename: activeFile, content })
+      });
+      alert('File berhasil disimpan!');
+    }
+
+    function closeEditor() {
+      document.getElementById('editorSection').classList.add('hidden');
+      activeFile = '';
+    }
+
+    async function deleteFile(filename) {
+      if (!confirm(`Hapus ${filename}?`)) return;
+      await fetch('/api/files/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder, filename })
+      });
+      loadFiles();
+    }
+
+    async function loadEnvSettings() {
+      try {
+        const res = await fetch(`/api/files/read?folder=${folder}&filename=.env`);
+        const envText = await res.text();
+        
+        const portMatch = envText.match(/PORT=(.*)/);
+        const domainMatch = envText.match(/DOMAIN=(.*)/);
+        
+        if (portMatch) document.getElementById('envPort').value = portMatch[1].trim();
+        if (domainMatch) document.getElementById('envDomain').value = domainMatch[1].trim();
+      } catch (e) {
+        console.log("File .env belum ada");
+      }
+    }
+
+    async function saveEnvSettings() {
+      const port = document.getElementById('envPort').value;
+      const domain = document.getElementById('envDomain').value;
+      const nodeVer = document.getElementById('envNodeVersion').value;
+      const content = `PORT=${port}\nDOMAIN=${domain}\nNODE_VERSION=${nodeVer}`;
+      
+      await fetch('/api/files/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder, filename: '.env', content })
+      });
+      alert('Konfigurasi server berhasil disimpan!');
+    }
+
+    async function runInstanceTerminal() {
+      const command = document.getElementById('instanceCmd').value.trim();
+      if (!command) return alert('Masukkan perintah terminal!');
+
+      const termBox = document.getElementById('instanceTermLogs');
+      termBox.innerText += `\n$ ${command}\nMemproses...`;
+
+      const res = await fetch('/api/terminal/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder, command })
+      });
+      const data = await res.json();
+      termBox.innerText = data.logs;
+      termBox.scrollTop = termBox.scrollHeight;
+      document.getElementById('instanceCmd').value = '';
+    }
+
+    loadFiles();
+  </script>
+</body>
+</html>

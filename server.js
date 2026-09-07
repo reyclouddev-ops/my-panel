@@ -149,15 +149,26 @@ app.get('/api/files', (req, res) => {
   res.json(items);
 });
 
+// UPLOAD DENGAN FITUR AUTO-EXTRACT ZIP
 app.post('/api/files/upload', (req, res) => {
   if (!req.files || !req.files.file) return res.status(400).send('File tidak ada');
   const { folder } = req.body;
   const file = req.files.file;
-  const target = path.join(ROOT_DIR, folder, file.name);
+  const targetDir = path.join(ROOT_DIR, folder);
+  const targetPath = path.join(targetDir, file.name);
 
-  file.mv(target, (err) => {
+  file.mv(targetPath, (err) => {
     if (err) return res.status(500).send(err);
-    res.redirect(`/manage.html?folder=${folder}`);
+
+    // Jika file berformat .zip, langsung ekstrak otomatis dan hapus zip aslinya
+    if (file.name.endsWith('.zip')) {
+      exec(`unzip -o "${file.name}" && rm "${file.name}"`, { cwd: targetDir }, (error) => {
+        if (error) console.log('Gagal ekstrak otomatis:', error);
+        res.redirect(`/manage.html?folder=${folder}`);
+      });
+    } else {
+      res.redirect(`/manage.html?folder=${folder}`);
+    }
   });
 });
 
